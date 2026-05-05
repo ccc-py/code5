@@ -82,11 +82,14 @@ class TestNVIDIAClient:
         config = Config(api_key="test-key")
         client = NVIDIAClient(config)
 
-        with patch("aiohttp.ClientSession.post") as mock_post:
-            mock_post.side_effect = aiohttp.ClientError("Network error")
+        try:
+            with patch("aiohttp.ClientSession.post") as mock_post:
+                mock_post.side_effect = aiohttp.ClientError("Network error")
 
-            with pytest.raises(RuntimeError, match="Network error"):
-                await client.generate("test prompt")
+                with pytest.raises(RuntimeError, match="Network error"):
+                    await client.generate("test prompt")
+        finally:
+            await client.close()
 
 
 class TestCreateClient:

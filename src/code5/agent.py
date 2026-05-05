@@ -26,10 +26,8 @@ from .tools import ShellTool, ToolExecutor, check_outside_access
 if TYPE_CHECKING:
     from .client import LLMClient
 
-# 正則表達式：用於解析代理回應中的標籤
+# 正則表達式：用於解析代理回應中的 shell 標籤和結束標記
 ShellPattern = re.compile(r"<shell>(.+?)</shell>", re.DOTALL)
-ReadPattern = re.compile(r"<read>(.+?)</read>", re.DOTALL)
-WritePattern = re.compile(r"<write>(.+?)</write>", re.DOTALL)
 EndPattern = re.compile(r"<end/>")
 
 
@@ -89,45 +87,84 @@ class Code5Agent:
         tool_result: str | None = None
         current_response = response
 
-        # 處理回應中的工具調用
+# 處理回應中的工具調用
         while True:
-            # 檢查是否為結束標記
-            if EndPattern.search(current_response):
-                response = EndPattern.split(current_response)[0].strip()
-                break
-
-            # 解析 shell 命令
+            # 先解析 shell 命令
             shell_matches = ShellPattern.findall(current_response)
-            if not shell_matches:
-                # 沒有 shell 命令，回應即為最終回應
-                response = current_response
-                break
+            
+            if shell_matches:
+                # 執行 shell 命令
 
-            all_outputs: list[str] = []
-            # 執行每個 shell 命令
-            for cmd in shell_matches:
-                cmd = cmd.strip()
-                if self._verbose:
-                    print(f"\n=== 執行命令 ===\n{cmd}\n", file=sys.stderr)
-
-                # 安全審查
-                review_result = await self.reviewer.review_async(cmd)
-                if not review_result.is_safe:
-                    output = f"命令被安全審查阻止：{review_result.reason}"
+                all_outputs: list[str] = []
+                for cmd in shell_matches:
+                    cmd = cmd.strip()
                     if self._verbose:
-                        print(f"  已阻止：{review_result.reason}", file=sys.stderr)
-                    all_outputs.append(output)
-                    continue
+                        print(f"\n=== 執行命令 ===\n{cmd}\n", file=sys.stderr)
 
-                # 檢查是否需要目錄外訪問
-                needs_access, outside_path = check_outside_access(cmd, Path.cwd())
-                if needs_access:
-                    if outside_path not in self.outside_access_granted:
-                        if not self.config.allow_outside_access:
-                            output = f"需要用戶明確授權才能訪問：{outside_path}"
-                            all_outputs.append(output)
-                            continue
-                        self.outside_access_granted.add(outside_path)
+                    # 安全審查
+                    review_result = await self.reviewer.review_async(cmd)
+                    if not review_result.is_safe:
+                        output = f"命令被安全審查阻止：{review_result.reason}"
+                        if self._verbose:
+                            print(f"  已阻止：{review_result.reason}", file=sys.stderr)
+                        all_outputs.append(output)
+                        continue
+
+                    # 檢查是否需要目錄外訪問
+                    needs_access, outside_path = check_outside_access(cmd, Path.cwd())
+                    if needs_access:
+                        if outside_path not in self.outside_access_granted:
+                            if not self.config.allow_outside_access:
+                                output = f"需要用戶明確授權才能訪問：{outside_path}"
+                                all_outputs.append(output)
+                                continue
+                            self.outside_access_granted.add(outside_path)
+
+                    # 執行 shell 命令
+                    result, allowed, msg = self.tool_executor.execute_shell(
+                        cmd,
+                        check_access=True,
+                        ask_for_access=False,
+                        granted_paths=self.outside_access_granted,
+                    )
+
+                    if not allowed:
+                        all_outputs.append(f"拒絕訪問：{msg}")
+                        continue
+
+                    output = result.output if result.output.strip() else "(無輸出)"
+                    all_outputs.append(f"$ {cmd}\n{output}")
+
+                    if self._verbose:
+                        print(f"  結果：{result.returncode}", file=sys.stderr)
+
+                # 組合工具輸出
+                tool_result = "\n".join(all_outputs)
+
+                # 執行完 shell 後，檢查是否有 <end/> 標記
+                if EndPattern.search(current_response):
+                    response = EndPattern.split(current_response)[0].strip()
+                    break
+                
+                # 繼續對話，獲取下一步指示
+                follow_up_prompt = f"""<context>{context}</context>
+
+<user>{user_input}</user>
+<assistant>{current_response}</assistant>
+<output>
+{chr(10).join(all_outputs)}
+</output>
+
+如果需要更多命令，輸出 <shell>。否則，輸出 <end/> 結束："""
+
+                current_response = await self.client.generate(follow_up_prompt, SYSTEM_PROMPT)
+            else:
+                # 沒有 shell 命令，檢查是否有 <end/> 標記
+                if EndPattern.search(current_response):
+                    response = EndPattern.split(current_response)[0].strip()
+                else:
+                    response = current_response
+                break
 
                 # 執行 shell 命令
                 result, allowed, msg = self.tool_executor.execute_shell(
@@ -150,6 +187,11 @@ class Code5Agent:
             # 組合工具輸出
             tool_result = "\n".join(all_outputs)
 
+            # 執行完 shell 後，檢查是否有 <end/> 標記
+            if EndPattern.search(current_response):
+                response = EndPattern.split(current_response)[0].strip()
+                break
+            
             # 繼續對話，獲取下一步指示
             follow_up_prompt = f"""<context>{context}</context>
 
@@ -162,6 +204,13 @@ class Code5Agent:
 如果需要更多命令，輸出 <shell>。否則，輸出 <end/> 結束："""
 
             current_response = await self.client.generate(follow_up_prompt, SYSTEM_PROMPT)
+            
+        else:
+            # 沒有 shell 命令，檢查是否有 <end/> 標記
+            if EndPattern.search(current_response):
+                response = EndPattern.split(current_response)[0].strip()
+            else:
+                response = current_response
 
         # 更新記憶體
         self.memory.update(user_input, response, tool_result)

@@ -45,11 +45,16 @@ def run(message: str | None, session: str | None, model: str | None, api_key: st
     if verbose:
         agent.verbose = True
 
-    if message:
-        result = asyncio.run(agent.run(message))
-        print(result)
-    else:
-        asyncio.run(agent.run_interactive())
+    try:
+        if message:
+            result = asyncio.run(agent.run(message))
+            print(result)
+        else:
+            asyncio.run(agent.run_interactive())
+    finally:
+        # 關閉 aiohttp session
+        if hasattr(client, 'close'):
+            asyncio.run(client.close())
 
 
 @cli.command()

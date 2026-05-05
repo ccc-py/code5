@@ -91,6 +91,10 @@ class NVIDIAClient(LLMClient):
 
     async def __aexit__(self, *args: object) -> None:
         await self.close()
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.close()
 
 
 class MockClient(LLMClient):
