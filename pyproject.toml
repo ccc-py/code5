@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "code5"
-version = "0.1.0"
+version = "0.2.0"
 description = "NVIDIA AI Coding Agent - OpenCode-like CLI tool with NVIDIA NIM"
 readme = "README.md"
 license = {text = "MIT"}

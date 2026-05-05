@@ -2,6 +2,8 @@
 
 import re
 
+from .db import Database
+
 
 class ConversationMemory:
     """Manages rolling conversation history with a maximum size limit."""
@@ -34,6 +36,9 @@ class ConversationMemory:
 
     def to_list(self) -> list[str]:
         return self.history.copy()
+
+    def from_list(self, items: list[str]) -> None:
+        self.history = items.copy()
 
 
 class KeyInfoMemory:
@@ -75,14 +80,35 @@ class KeyInfoMemory:
     def to_list(self) -> list[str]:
         return self.key_info.copy()
 
+    def from_list(self, items: list[str]) -> None:
+        self.key_info = items.copy()
+
 
 class MemoryManager:
     """Combined memory manager for conversation and key info."""
 
-    def __init__(self, max_turns: int = 10, max_key_info: int = 20) -> None:
+    def __init__(self, max_turns: int = 10, max_key_info: int = 20, session_id: str | None = None, use_db: bool = True) -> None:
         self.conversation = ConversationMemory(max_turns=max_turns)
         self.key_info = KeyInfoMemory(max_items=max_key_info)
         self._outside_access_granted: set[str] = set()
+        self._session_id = session_id
+        self._use_db = use_db
+
+        if use_db and session_id:
+            self._load_from_db()
+
+    def _load_from_db(self) -> None:
+        """Load data from SQLite"""
+        if not self._session_id:
+            return
+        db = Database.get_instance()
+        user_convs = db.get_user_conversations(self._session_id)
+        conv_list = db.get_conversations(self._session_id)
+        self.conversation.from_list([
+            f"<user>{c['content']}</user>" if c['role'] == 'user' else f"<assistant>{c['content']}</assistant>"
+            for c in conv_list
+        ])
+        self.key_info.from_list(db.get_key_info(self._session_id))
 
     def update(
         self,
@@ -92,10 +118,19 @@ class MemoryManager:
     ) -> None:
         if user_input:
             self.conversation.add_user(user_input)
+            if self._use_db and self._session_id:
+                Database.get_instance().add_conversation(self._session_id, "user", user_input)
         if assistant_response:
             self.conversation.add_assistant(assistant_response)
+            if self._use_db and self._session_id:
+                Database.get_instance().add_conversation(self._session_id, "assistant", assistant_response)
         if tool_result:
             self.conversation.add_tool(tool_result)
+
+    def add_key_info(self, item: str) -> None:
+        self.key_info.add(item)
+        if self._use_db and self._session_id:
+            Database.get_instance().add_key_info(self._session_id, item)
 
     def build_context(self) -> str:
         parts = []
@@ -117,6 +152,8 @@ class MemoryManager:
         self.conversation.clear()
         self.key_info.clear()
         self._outside_access_granted.clear()
+        if self._use_db and self._session_id:
+            Database.get_instance().clear_session(self._session_id)
 
     def to_dict(self) -> dict:
         return {
@@ -128,8 +165,8 @@ class MemoryManager:
     @classmethod
     def from_dict(cls, data: dict) -> "MemoryManager":
         manager = cls()
-        manager.conversation.history = data.get("conversation", [])
-        manager.key_info.key_info = data.get("key_info", [])
+        manager.conversation.from_list(data.get("conversation", []))
+        manager.key_info.from_list(data.get("key_info", []))
         manager._outside_access_granted = set(data.get("outside_access_granted", []))
         return manager
 

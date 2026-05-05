@@ -185,7 +185,7 @@ class TestIntegration:
         config = Config(use_mock=True)
         agent = Code5Agent(client=mock_client, config=config, reviewer=MockReviewer())
 
-        result = await agent.run("say hello")
+        await agent.run("say hello")
 
         # 驗證檔案被建立
         hello_file = tmp_path / "hello.py"
@@ -211,7 +211,7 @@ class TestIntegration:
         config = Config(use_mock=True)
         agent = Code5Agent(client=mock_client, config=config, reviewer=MockReviewer())
 
-        result = await agent.run("list files")
+        await agent.run("list files")
 
         # 驗證記憶中有 tool result
         assert len(agent.memory.conversation) > 0
@@ -232,7 +232,7 @@ class TestIntegration:
         config = Config(use_mock=True)
         agent = Code5Agent(client=mock_client, config=config, reviewer=MockReviewer())
 
-        result = await agent.run("delete everything")
+        await agent.run("delete everything")
 
         # 驗證危險命令被阻止（使用 MockReviewer 所以不阻止dangerous關鍵字）
         # 但 rm -rf / 是危險的應被阻擋
@@ -254,7 +254,7 @@ class TestIntegration:
         config = Config(use_mock=True)
         agent = Code5Agent(client=mock_client, config=config, reviewer=MockReviewer())
 
-        result = await agent.run("create project")
+        await agent.run("create project")
 
         # 驗證目錄和檔案都被建立
         hello_file = tmp_path / "testdir" / "hello.py"
@@ -276,7 +276,7 @@ class TestIntegration:
         config = Config(use_mock=True)
         agent = Code5Agent(client=mock_client, config=config, reviewer=MockReviewer())
 
-        result = await agent.run("say hello")
+        await agent.run("say hello")
 
         # 如果有 <end/>，就不會執行任何 shell 命令
         assert len(agent.memory.conversation) >= 2  # user + assistant

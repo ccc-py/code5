@@ -28,6 +28,12 @@ class LLMClient(ABC):
         """
         raise NotImplementedError
 
+    async def generate_stream(
+        self, prompt: str, system: str = ""
+    ) -> str:
+        """Generate a response with streaming (default: non-streaming)."""
+        return await self.generate(prompt, system)
+
 
 class NVIDIAClient(LLMClient):
     """Client for NVIDIA NIM API (OpenAI-compatible)."""
@@ -81,16 +87,68 @@ class NVIDIAClient(LLMClient):
         except aiohttp.ClientError as e:
             raise RuntimeError(f"Network error calling NVIDIA API: {e}") from e
 
+    async def generate_stream(
+        self, prompt: str, system: str = ""
+    ) -> str:
+        """Generate a response with streaming."""
+        if not self.config.api_key:
+            raise ValueError("NVIDIA API key not configured.")
+
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        session = await self._get_session()
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 4096,
+            "stream": True,
+        }
+
+        try:
+            async with session.post(
+                f"{self.base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise RuntimeError(f"NVIDIA API error {resp.status}: {error_text}")
+
+                full_content = ""
+                async for line in resp.content:
+                    line = line.decode("utf-8").strip()
+                    if line.startswith("data: "):
+                        data = line[6:]
+                        if data == "[DONE]":
+                            break
+                        if data.startswith("{"):
+                            import json
+
+                            chunk = json.loads(data)
+                            if "choices" in chunk and chunk["choices"]:
+                                delta = chunk["choices"][0].get("delta", {})
+                                if "content" in delta:
+                                    full_content += delta["content"]
+                return full_content
+        except aiohttp.ClientError as e:
+            raise RuntimeError(f"Network error calling NVIDIA API: {e}") from e
+
     async def close(self) -> None:
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
 
     async def __aenter__(self) -> "NVIDIAClient":
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        await self.close()
         return self
 
     async def __aexit__(self, *args: object) -> None:

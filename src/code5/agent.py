@@ -40,6 +40,7 @@ class Code5Agent:
         config: Config | None = None,
         reviewer: CommandReviewer | None = None,
         session_manager: SessionManager | None = None,
+        session_id: str | None = None,
     ) -> None:
         self.config = config or DEFAULT_CONFIG
         # 如果沒有提供客戶端，則根據配置創建
@@ -48,10 +49,12 @@ class Code5Agent:
         # Shell 工具和執行器
         self.shell_tool = ShellTool(timeout=self.config.shell_timeout)
         self.tool_executor = ToolExecutor(shell_tool=self.shell_tool, timeout=self.config.shell_timeout)
-        # 記憶體管理器
+        # 記憶體管理器 - 傳入 session_id 以使用 SQLite
         self.memory = MemoryManager(
             max_turns=self.config.max_turns,
             max_key_info=20,
+            session_id=session_id,
+            use_db=True if session_id else False,
         )
         # Session 管理器
         self.session_manager = session_manager or SessionManager()
@@ -69,11 +72,17 @@ class Code5Agent:
         """設定詳細輸出模式"""
         self._verbose = value
 
-    async def run(self, user_input: str) -> str:
+    async def run(
+        self,
+        user_input: str,
+        on_chunk: callable[[str], None] | None = None,
+        keep_tags: bool = False,
+    ) -> str:
         """執行單次對話
 
         Args:
             user_input: 使用者輸入
+            on_chunk: 回呼函數，每個區塊回應時調用
 
         Returns:
             代理的回應文字
@@ -83,7 +92,14 @@ class Code5Agent:
         full_prompt = f"{context}\n\n<user>{user_input}</user>" if context else f"<user>{user_input}</user>"
 
         # 呼叫 LLM 獲取回應
+        print(f"\n[LLM] 請求: {full_prompt}", file=sys.stderr)
         response = await self.client.generate(full_prompt, SYSTEM_PROMPT)
+        print(f"[LLM] 回應: {response}", file=sys.stderr)
+
+        # 回調每個區塊
+        if on_chunk:
+            on_chunk(response)
+
         tool_result: str | None = None
         current_response = response
 
@@ -91,22 +107,23 @@ class Code5Agent:
         while True:
             # 先解析 shell 命令
             shell_matches = ShellPattern.findall(current_response)
-            
+
             if shell_matches:
                 # 執行 shell 命令
+                print("\n" + "=" * 60, file=sys.stderr)
+                print("[Shell] 執行命令:", file=sys.stderr)
 
                 all_outputs: list[str] = []
                 for cmd in shell_matches:
                     cmd = cmd.strip()
-                    if self._verbose:
-                        print(f"\n=== 執行命令 ===\n{cmd}\n", file=sys.stderr)
+                    print(f"  $ {cmd}", file=sys.stderr)
 
                     # 安全審查
+                    print("[Shell] 安全審查中...", file=sys.stderr)
                     review_result = await self.reviewer.review_async(cmd)
                     if not review_result.is_safe:
                         output = f"命令被安全審查阻止：{review_result.reason}"
-                        if self._verbose:
-                            print(f"  已阻止：{review_result.reason}", file=sys.stderr)
+                        print(f"  [已阻止] {review_result.reason}", file=sys.stderr)
                         all_outputs.append(output)
                         continue
 
@@ -116,11 +133,13 @@ class Code5Agent:
                         if outside_path not in self.outside_access_granted:
                             if not self.config.allow_outside_access:
                                 output = f"需要用戶明確授權才能訪問：{outside_path}"
+                                print(f"  [需要授權] {outside_path}", file=sys.stderr)
                                 all_outputs.append(output)
                                 continue
                             self.outside_access_granted.add(outside_path)
 
                     # 執行 shell 命令
+                    print("[Shell] 執行中...", file=sys.stderr)
                     result, allowed, msg = self.tool_executor.execute_shell(
                         cmd,
                         check_access=True,
@@ -134,19 +153,25 @@ class Code5Agent:
 
                     output = result.output if result.output.strip() else "(無輸出)"
                     all_outputs.append(f"$ {cmd}\n{output}")
-
-                    if self._verbose:
-                        print(f"  結果：{result.returncode}", file=sys.stderr)
+                    print(f"[Shell] 完成: returncode={result.returncode}", file=sys.stderr)
+                    if result.output:
+                        print(f"[Shell] 輸出:\n{result.output}", file=sys.stderr)
 
                 # 組合工具輸出
                 tool_result = "\n".join(all_outputs)
+                print("[Shell] 所有命令執行完成", file=sys.stderr)
+                print("=" * 60 + "\n", file=sys.stderr)
 
                 # 執行完 shell 後，檢查是否有 <end/> 標記
                 if EndPattern.search(current_response):
-                    response = EndPattern.split(current_response)[0].strip()
+                    if keep_tags:
+                        response = current_response
+                    else:
+                        response = EndPattern.split(current_response)[0].strip()
                     break
-                
+
                 # 繼續對話，獲取下一步指示
+                print("[LLM] 請求下一步指示...", file=sys.stderr)
                 follow_up_prompt = f"""<context>{context}</context>
 
 <user>{user_input}</user>
@@ -158,10 +183,18 @@ class Code5Agent:
 如果需要更多命令，輸出 <shell>。否則，輸出 <end/> 結束："""
 
                 current_response = await self.client.generate(follow_up_prompt, SYSTEM_PROMPT)
+                print(f"[LLM] 下一步: {current_response}", file=sys.stderr)
+
+                # 回調每個區塊
+                if on_chunk:
+                    on_chunk(current_response)
             else:
                 # 沒有 shell 命令，檢查是否有 <end/> 標記
                 if EndPattern.search(current_response):
-                    response = EndPattern.split(current_response)[0].strip()
+                    if keep_tags:
+                        response = current_response
+                    else:
+                        response = EndPattern.split(current_response)[0].strip()
                 else:
                     response = current_response
                 break
@@ -191,7 +224,7 @@ class Code5Agent:
             if EndPattern.search(current_response):
                 response = EndPattern.split(current_response)[0].strip()
                 break
-            
+
             # 繼續對話，獲取下一步指示
             follow_up_prompt = f"""<context>{context}</context>
 
@@ -204,7 +237,7 @@ class Code5Agent:
 如果需要更多命令，輸出 <shell>。否則，輸出 <end/> 結束："""
 
             current_response = await self.client.generate(follow_up_prompt, SYSTEM_PROMPT)
-            
+
         else:
             # 沒有 shell 命令，檢查是否有 <end/> 標記
             if EndPattern.search(current_response):
