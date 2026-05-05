@@ -41,6 +41,7 @@ class Code5Agent:
         reviewer: CommandReviewer | None = None,
         session_manager: SessionManager | None = None,
         session_id: str | None = None,
+        agent_id: str | None = None,
     ) -> None:
         self.config = config or DEFAULT_CONFIG
         # 如果沒有提供客戶端，則根據配置創建
@@ -49,11 +50,12 @@ class Code5Agent:
         # Shell 工具和執行器
         self.shell_tool = ShellTool(timeout=self.config.shell_timeout)
         self.tool_executor = ToolExecutor(shell_tool=self.shell_tool, timeout=self.config.shell_timeout)
-        # 記憶體管理器 - 傳入 session_id 以使用 SQLite
+        # 記憶體管理器 - 傳入 session_id 和 agent_id 以使用 SQLite
         self.memory = MemoryManager(
             max_turns=self.config.max_turns,
             max_key_info=20,
             session_id=session_id,
+            agent_id=agent_id or "root",
             use_db=True if session_id else False,
         )
         # Session 管理器

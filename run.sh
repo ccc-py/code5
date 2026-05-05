@@ -1,8 +1,11 @@
-python -m code5 run
-python -m code5 run -n <session_name> "Hello"
-python -m code5 run --use-mock
-python -m code5 session list
-python -m code5 run -n <session_name>
+pip install -e .
+code5 run -n ccctest
+
+#python -m code5 run
+#python -m code5 run -n <session_name> "Hello"
+#python -m code5 run --use-mock
+#python -m code5 session list
+#python -m code5 run -n <session_name>
 
 
 #code5 run --use-mock "說 hello"

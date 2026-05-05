@@ -87,28 +87,42 @@ class KeyInfoMemory:
 class MemoryManager:
     """Combined memory manager for conversation and key info."""
 
-    def __init__(self, max_turns: int = 10, max_key_info: int = 20, session_id: str | None = None, use_db: bool = True) -> None:
+    def __init__(
+        self,
+        max_turns: int = 10,
+        max_key_info: int = 20,
+        session_id: str | None = None,
+        agent_id: str | None = None,
+        use_db: bool = True,
+    ) -> None:
         self.conversation = ConversationMemory(max_turns=max_turns)
         self.key_info = KeyInfoMemory(max_items=max_key_info)
         self._outside_access_granted: set[str] = set()
         self._session_id = session_id
+        self._agent_id = agent_id or "root"
         self._use_db = use_db
 
         if use_db and session_id:
             self._load_from_db()
 
     def _load_from_db(self) -> None:
-        """Load data from SQLite"""
+        """Load data from SQLite for current session and agent"""
         if not self._session_id:
             return
         db = Database.get_instance()
-        user_convs = db.get_user_conversations(self._session_id)
-        conv_list = db.get_conversations(self._session_id)
+        conv_list = db.get_conversations(self._session_id, self._agent_id)
         self.conversation.from_list([
             f"<user>{c['content']}</user>" if c['role'] == 'user' else f"<assistant>{c['content']}</assistant>"
             for c in conv_list
         ])
-        self.key_info.from_list(db.get_key_info(self._session_id))
+        self.key_info.from_list(db.get_key_info(self._session_id, self._agent_id))
+
+    def set_agent(self, agent_id: str) -> None:
+        """Switch to a different agent"""
+        self._agent_id = agent_id
+        self.conversation.clear()
+        self.key_info.clear()
+        self._load_from_db()
 
     def update(
         self,
@@ -119,18 +133,22 @@ class MemoryManager:
         if user_input:
             self.conversation.add_user(user_input)
             if self._use_db and self._session_id:
-                Database.get_instance().add_conversation(self._session_id, "user", user_input)
+                Database.get_instance().add_conversation(
+                    self._session_id, self._agent_id, "user", user_input
+                )
         if assistant_response:
             self.conversation.add_assistant(assistant_response)
             if self._use_db and self._session_id:
-                Database.get_instance().add_conversation(self._session_id, "assistant", assistant_response)
+                Database.get_instance().add_conversation(
+                    self._session_id, self._agent_id, "assistant", assistant_response
+                )
         if tool_result:
             self.conversation.add_tool(tool_result)
 
     def add_key_info(self, item: str) -> None:
         self.key_info.add(item)
         if self._use_db and self._session_id:
-            Database.get_instance().add_key_info(self._session_id, item)
+            Database.get_instance().add_key_info(self._session_id, self._agent_id, item)
 
     def build_context(self) -> str:
         parts = []

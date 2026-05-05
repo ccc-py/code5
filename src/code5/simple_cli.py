@@ -83,7 +83,6 @@ def chat(prompt: str | None, use_mock: bool) -> None:
 
 def main():
     """Entry point"""
-    import sys
     if len(sys.argv) > 1:
         if sys.argv[1] == "tui":
             click.echo("TUI 已移除，請使用: code5 chat")
