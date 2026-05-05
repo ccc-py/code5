@@ -1,5 +1,5 @@
 pip install -e .
-code5 run -n ccctest
+code5 /attach ccctest
 
 #python -m code5 run
 #python -m code5 run -n <session_name> "Hello"
