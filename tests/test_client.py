@@ -62,6 +62,26 @@ class TestMockClient:
         assert client.call_count == 0
         assert client.last_prompt == ""
 
+    @pytest.mark.asyncio
+    async def test_mock_client_streaming(self) -> None:
+        """測試串流輸出"""
+        client = MockClient(default_response="Hello World")
+        chunks = []
+        async for chunk in client.generate_stream("test"):
+            chunks.append(chunk)
+        assert chunks == ["Hello World"]
+
+    @pytest.mark.asyncio
+    async def test_mock_client_streaming_yields_at_least_one_chunk(self) -> None:
+        """測試串流至少 yield 一個 chunk"""
+        client = MockClient(responses={"hello": "Hello World"})
+        chunks = []
+        async for chunk in client.generate_stream("say hello"):
+            chunks.append(chunk)
+        assert len(chunks) >= 1
+        full = "".join(chunks)
+        assert "Hello" in full
+
 
 class TestNVIDIAClient:
     @pytest.mark.asyncio

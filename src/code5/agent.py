@@ -93,17 +93,22 @@ class Code5Agent:
         context = self.memory.build_context()
         full_prompt = f"{context}\n\n<user>{user_input}</user>" if context else f"<user>{user_input}</user>"
 
-        # 呼叫 LLM 獲取回應
+        # 呼叫 LLM 獲取回應 (串流)
         if self._verbose:
             print(f"\n[LLM] 請求: {full_prompt[:200]}...", file=sys.stderr)
-        response = await self.client.generate(full_prompt, SYSTEM_PROMPT)
+
+        full_response = ""
+        async for chunk in self.client.generate_stream(full_prompt, SYSTEM_PROMPT):
+            full_response += chunk
+            print(chunk, end="", flush=True)
+            if on_chunk:
+                on_chunk(chunk)
+        print()  # newline after streaming
+
         if self._verbose:
-            print(f"[LLM] 回應: {response[:200]}...", file=sys.stderr)
+            print(f"[LLM] 回應: {full_response[:200]}...", file=sys.stderr)
 
-        # 回調每個區塊
-        if on_chunk:
-            on_chunk(response)
-
+        response = full_response
         tool_result: str | None = None
         current_response = response
 

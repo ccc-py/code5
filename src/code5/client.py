@@ -28,11 +28,14 @@ class LLMClient(ABC):
         """
         raise NotImplementedError
 
-    async def generate_stream(
-        self, prompt: str, system: str = ""
-    ) -> str:
-        """Generate a response with streaming (default: non-streaming)."""
-        return await self.generate(prompt, system)
+    async def generate_stream(self, prompt: str, system: str = ""):
+        """Async generator that yields response chunks.
+
+        Default implementation yields the complete response at once.
+        Override this in subclass for true streaming.
+        """
+        result = await self.generate(prompt, system)
+        yield result
 
 
 class NVIDIAClient(LLMClient):
@@ -88,9 +91,8 @@ class NVIDIAClient(LLMClient):
             raise RuntimeError(f"Network error calling NVIDIA API: {e}") from e
 
     async def generate_stream(
-        self, prompt: str, system: str = ""
-    ) -> str:
-        """Generate a response with streaming."""
+        self, prompt: str, system: str = ""):
+        """Generate a response with streaming. Yields chunks as they arrive."""
         if not self.config.api_key:
             raise ValueError("NVIDIA API key not configured.")
 
@@ -124,7 +126,6 @@ class NVIDIAClient(LLMClient):
                     error_text = await resp.text()
                     raise RuntimeError(f"NVIDIA API error {resp.status}: {error_text}")
 
-                full_content = ""
                 async for line in resp.content:
                     line = line.decode("utf-8").strip()
                     if line.startswith("data: "):
@@ -138,8 +139,7 @@ class NVIDIAClient(LLMClient):
                             if "choices" in chunk and chunk["choices"]:
                                 delta = chunk["choices"][0].get("delta", {})
                                 if "content" in delta:
-                                    full_content += delta["content"]
-                return full_content
+                                    yield delta["content"]
         except aiohttp.ClientError as e:
             raise RuntimeError(f"Network error calling NVIDIA API: {e}") from e
 
