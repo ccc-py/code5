@@ -111,10 +111,11 @@ class MemoryManager:
             return
         db = Database.get_instance()
         conv_list = db.get_conversations(self._session_id, self._agent_id)
-        self.conversation.from_list([
+        all_items = [
             f"<user>{c['content']}</user>" if c['role'] == 'user' else f"<assistant>{c['content']}</assistant>"
             for c in conv_list
-        ])
+        ]
+        self.conversation.from_list(all_items[-self.conversation.max_turns * 2 :])
         self.key_info.from_list(db.get_key_info(self._session_id, self._agent_id))
 
     def set_agent(self, agent_id: str) -> None:

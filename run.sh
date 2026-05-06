@@ -1,6 +1,7 @@
-pip install -e .
-code5 /attach ccctest
-
+# pip install -e .
+python -m code5 /attach ccc3
+python -m code5 /attach ccctest
+python -m code5 /attach ccctest --mock
 #python -m code5 run
 #python -m code5 run -n <session_name> "Hello"
 #python -m code5 run --use-mock

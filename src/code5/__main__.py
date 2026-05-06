@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 
 import click
 
@@ -146,7 +147,7 @@ Code5 - AI Coding Agent
     sys.exit(1)
 
 
-def run_session(command: str, session_name: str, mock: bool, verbose: bool) -> None:
+def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: bool = False) -> None:
     """Run session in interactive or batch mode."""
     config = load_config_from_env()
     if mock:
@@ -158,14 +159,12 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool) -> N
     session_id = session_name
     db = Database.get_instance()
 
-    # Check if session exists for attach
     if command in ("/attach", "attach"):
         convs = db.get_conversations(session_id)
         if not convs:
-            click.echo(f"錯誤: session '{session_id}' 不存在", err=True)
+            click.echo(f"錯誤: session '{session_name}' 不存在", err=True)
             sys.exit(1)
 
-    # Ensure root agent exists
     db.add_agent(session_id, "root", "root")
 
     agent = Code5Agent(
@@ -179,12 +178,40 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool) -> N
     if verbose:
         agent.verbose = True
 
-    current_session_id = [session_id]
+    current_session_id = [session_name]
     current_agent_id = ["root"]
     current_agent = [agent]
+    pending_tasks: dict[str, asyncio.Task] = {}
+    task_counter = [0]
+    user_input_lines: list[str] = []
+    input_lock = threading.Lock()
+    input_thread_running = [True]
+    is_interactive = sys.stdin.isatty()
+
+    def read_input_thread():
+        while input_thread_running[0]:
+            try:
+                line = input()
+                with input_lock:
+                    user_input_lines.append(line)
+            except (EOFError, KeyboardInterrupt):
+                with input_lock:
+                    user_input_lines.append("/exit")
+                break
+
+    async def check_pending_tasks() -> None:
+        done_ids = []
+        for task_id, task in list(pending_tasks.items()):
+            if task.done():
+                done_ids.append(task_id)
+                try:
+                    task.result()
+                except Exception:
+                    pass
+        for tid in done_ids:
+            del pending_tasks[tid]
 
     async def run_once():
-        # Check if there's input from pipe/heredoc
         if not sys.stdin.isatty():
             stdin_text = sys.stdin.read()
             if stdin_text:
@@ -203,53 +230,82 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool) -> N
                 if not user_input:
                     continue
 
-                # Process commands
                 if user_input.startswith("/"):
-                    result = handle_command(user_input, current_session_id, current_agent_id, current_agent, client, config, reviewer, db)
+                    result = handle_command(user_input, current_session_id, current_agent_id, current_agent, client, config, reviewer, db, pending_tasks, task_counter)
                     if result is not None:
                         print(result)
                 else:
                     print(f"[你] {user_input}")
-                    result = await current_agent[0].run(user_input)
+                    await current_agent[0].run(user_input)
                     print(result)
                     print("-" * 50)
+
+            while pending_tasks:
+                await check_pending_tasks()
+                await asyncio.sleep(0.2)
         else:
-            # Interactive mode
             print(f"Code5 - 對話區塊: {current_session_id[0]} | agent: {current_agent_id[0]}")
-            print("指令: /help 說明")
+            print("指令: /help, /bg 背景執行, /jobs 查看任務")
             print("=" * 50)
+
+            input_thread = threading.Thread(target=read_input_thread, daemon=True)
+            input_thread.start()
+
+            if is_interactive:
+                sys.stderr.write(">>> ")
+                sys.stderr.flush()
+
             while True:
-                try:
-                    user_input = input("> ").strip()
-                except (EOFError, KeyboardInterrupt):
-                    print("\n再見！")
-                    break
+                await check_pending_tasks()
+
+                with input_lock:
+                    if user_input_lines:
+                        user_input = user_input_lines.pop(0)
+                    else:
+                        user_input = None
+                        await asyncio.sleep(0.3)
+                        continue
+
+                user_input = user_input.strip() if user_input else ""
 
                 if user_input.lower() in ("/exit", "/quit", "exit", "quit"):
                     print("再見！")
+                    input_thread_running[0] = False
                     break
 
                 if not user_input:
                     continue
 
-                # Process commands
                 if user_input.startswith("/"):
-                    result = handle_command(user_input, current_session_id, current_agent_id, current_agent, client, config, reviewer, db)
+                    is_bg = user_input.startswith("/bg ")
+                    result = handle_command(user_input, current_session_id, current_agent_id, current_agent, client, config, reviewer, db, pending_tasks, task_counter)
                     if result is not None:
                         print(result)
+                    if is_interactive:
+                        sys.stderr.write(">>> ")
+                        sys.stderr.flush()
                 else:
                     print(f"[你] {user_input}")
-                    result = await current_agent[0].run(user_input)
-                    print(result)
+                    await check_pending_tasks()
+                    try:
+                        await current_agent[0].run(user_input)
+                        print(result)
+                    except Exception as e:
+                        print(f"錯誤: {e}")
+                    if is_interactive:
+                        sys.stderr.write(">>> ")
+                        sys.stderr.flush()
 
+        input_thread_running[0] = False
         if hasattr(client, "close"):
             await client.close()
 
     asyncio.run(run_once())
 
 
-def handle_command(user_input: str, current_session_id: list, current_agent_id: list, current_agent: list, client, config, reviewer, db) -> str | None:
+def handle_command(user_input: str, current_session_id: list, current_agent_id: list, current_agent: list, client, config, reviewer, db, pending_tasks: dict | None = None, task_counter: list | None = None) -> str | None:
     """Handle / commands."""
+    current_agent[0].memory.update(user_input, "", None)
     cmd = user_input.lower()
 
     # /help
@@ -269,8 +325,53 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
 /agent attach <name> - 切換到其他 agent
 /agent history    - 顯示該 agent 提問
 /agent log         - 顯示該 agent 完整記錄
+/bg <prompt>       - 背景執行，不等待結果
+/jobs              - 查看背景任務狀態
 /exit              - 結束對話
 """
+
+    # /bg - 背景執行
+    if cmd.startswith("/bg "):
+        if pending_tasks is None or task_counter is None:
+            return "錯誤: 背景模式不可用"
+        prompt = user_input.split("/bg ", 1)[1].strip()
+        if not prompt:
+            return "用法: /bg <prompt>"
+        task_counter[0] += 1
+        task_id = str(task_counter[0])
+
+        from io import StringIO
+        output_buffer = StringIO()
+
+        async def run_bg():
+            import sys
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+            try:
+                sys.stdout = output_buffer
+                sys.stderr = output_buffer
+                await current_agent[0].run(prompt)
+            finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+                output = output_buffer.getvalue()
+                if output:
+                    print(f"[背景任務 #{task_id} 輸出]\n{output}")
+
+        task = asyncio.create_task(run_bg())
+        pending_tasks[task_id] = task
+        return "任務已在背景執行 ..."
+
+    # /jobs - 查看背景任務
+    if cmd in ("/jobs", "jobs"):
+        if not pending_tasks:
+            return "\n沒有進行中的任務"
+        output = "\n=== 背景任務 ==="
+        for tid, task in pending_tasks.items():
+            status = "完成" if task.done() else "進行中"
+            output += f"\n  #{tid}: {status}"
+        output += "\n" + "=" * 50
+        return output
 
     # /shell <command>
     if cmd.startswith("/shell ") or cmd.startswith("shell "):

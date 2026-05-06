@@ -94,9 +94,11 @@ class Code5Agent:
         full_prompt = f"{context}\n\n<user>{user_input}</user>" if context else f"<user>{user_input}</user>"
 
         # 呼叫 LLM 獲取回應
-        print(f"\n[LLM] 請求: {full_prompt}", file=sys.stderr)
+        if self._verbose:
+            print(f"\n[LLM] 請求: {full_prompt[:200]}...", file=sys.stderr)
         response = await self.client.generate(full_prompt, SYSTEM_PROMPT)
-        print(f"[LLM] 回應: {response}", file=sys.stderr)
+        if self._verbose:
+            print(f"[LLM] 回應: {response[:200]}...", file=sys.stderr)
 
         # 回調每個區塊
         if on_chunk:
@@ -173,7 +175,8 @@ class Code5Agent:
                     break
 
                 # 繼續對話，獲取下一步指示
-                print("[LLM] 請求下一步指示...", file=sys.stderr)
+                if self._verbose:
+                    print("[LLM] 請求下一步指示...", file=sys.stderr)
                 follow_up_prompt = f"""<context>{context}</context>
 
 <user>{user_input}</user>
@@ -185,7 +188,8 @@ class Code5Agent:
 如果需要更多命令，輸出 <shell>。否則，輸出 <end/> 結束："""
 
                 current_response = await self.client.generate(follow_up_prompt, SYSTEM_PROMPT)
-                print(f"[LLM] 下一步: {current_response}", file=sys.stderr)
+                if self._verbose:
+                    print(f"[LLM] 下一步: {current_response[:200]}...", file=sys.stderr)
 
                 # 回調每個區塊
                 if on_chunk:
