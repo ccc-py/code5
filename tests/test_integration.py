@@ -309,68 +309,6 @@ class TestBgFix:
 
         asyncio.run(run())
 
-    def test_bglog_shows_output(self):
-        """測試 /bglog 顯示背景任務輸出"""
-
-        async def run():
-            self.handle_command(
-                "/bg 說 hello",
-                self.current_session_id,
-                self.current_agent_id,
-                self.current_agent,
-                self.client,
-                self.config,
-                None,
-                self.db,
-                self.pending_tasks,
-                self.task_counter,
-                self.bg_outputs,
-            )
-
-            await asyncio.sleep(0.1)
-
-            bglog = self.handle_command(
-                "/bglog 10",
-                self.current_session_id,
-                self.current_agent_id,
-                self.current_agent,
-                self.client,
-                self.config,
-                None,
-                self.db,
-                self.pending_tasks,
-                self.task_counter,
-                self.bg_outputs,
-            )
-
-            assert bglog is not None
-            assert "背景任務輸出" in bglog
-            assert "#1" in bglog
-
-        asyncio.run(run())
-
-    def test_bglog_requires_n(self):
-        """測試 /bglog 需要參數"""
-
-        async def run():
-            result = self.handle_command(
-                "/bglog",
-                self.current_session_id,
-                self.current_agent_id,
-                self.current_agent,
-                self.client,
-                self.config,
-                None,
-                self.db,
-                self.pending_tasks,
-                self.task_counter,
-                self.bg_outputs,
-            )
-            assert "用法" in result
-            assert "bglog" in result
-
-        asyncio.run(run())
-
     def test_command_added_to_history(self):
         """測試 /指令 也會加入 history"""
 

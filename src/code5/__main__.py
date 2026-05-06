@@ -79,7 +79,7 @@ Code5 - AI Coding Agent
   /agent history    - 顯示該 agent 提問
   /agent log         - 顯示該 agent 完整記錄
   /bg <prompt>       - 背景執行，不等待結果
-  /bglog <n>         - 查看前 n 個背景任務輸出
+
   /jobs              - 查看背景任務狀態
   /exit              - 結束對話
 """)
@@ -214,10 +214,6 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: 
                     pass
         for tid in done_ids:
             del pending_tasks[tid]
-            if tid in bg_outputs:
-                output = bg_outputs.pop(tid)
-                if output:
-                    print(f"[背景任務 #{tid} 輸出]\n{output}")
 
     async def run_once():
         if not sys.stdin.isatty():
@@ -284,7 +280,6 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: 
                     continue
 
                 if user_input.startswith("/"):
-                    is_bg = user_input.startswith("/bg ")
                     result = handle_command(user_input, current_session_id, current_agent_id, current_agent, client, config, reviewer, db, pending_tasks, task_counter, bg_outputs)
                     if result is not None:
                         print(result)
@@ -332,7 +327,6 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
 /agent history    - 顯示該 agent 提問
 /agent log         - 顯示該 agent 完整記錄
 /bg <prompt>       - 背景執行，不等待結果
-/bglog <n>         - 查看前 n 個背景任務輸出
 /jobs              - 查看背景任務狀態
 /exit              - 結束對話
 """
@@ -374,34 +368,6 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
         task = asyncio.create_task(run_bg())
         pending_tasks[task_id] = task
         return f"任務已在背景執行 (ID: #{task_id}) ..."
-
-    # /bglog - 查看背景任務輸出
-    if cmd.startswith("/bglog"):
-        if bg_outputs is None:
-            return "錯誤: 無法使用背景輸出功能"
-        parts = user_input.split()
-        if len(parts) < 2:
-            return "用法: /bglog <n> - 查看前 n 個背景任務輸出"
-        try:
-            n = int(parts[1])
-        except ValueError:
-            return "用法: /bglog <n> - n 必須是數字"
-        items = list(bg_outputs.items())[-n:]
-        if not items:
-            return "\n沒有背景任務輸出\n" + "=" * 50
-        output = "\n=== 背景任務輸出 ==="
-        for tid, content in items:
-            if content.startswith("[進行中]"):
-                status = "進行中"
-                output += f"\n#{tid} ({status}): {content}"
-            elif content.startswith("[錯誤]"):
-                status = "錯誤"
-                output += f"\n#{tid} ({status}): {content}"
-            else:
-                status = "完成"
-                output += f"\n#{tid} ({status}):\n{content}"
-        output += "\n" + "=" * 50
-        return output
 
     # /jobs - 查看背景任務
     if cmd in ("/jobs", "jobs"):
