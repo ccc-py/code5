@@ -115,7 +115,6 @@ class TestBgFix:
             assert history is not None
             assert "說 hi" in history
             assert "說 hello" in history
-            assert "/bg 說 hello" in history
 
         asyncio.run(run())
 
@@ -373,9 +372,164 @@ class TestBgFix:
 
             assert history is not None
             assert "說 hi" in history
-            assert "/list" in history
-            assert "/now" in history
-            assert "/help" in history
+
+        asyncio.run(run())
+
+    def test_log_skips_commands(self):
+        """測試 /log 不顯示 / 開頭的指令"""
+
+        async def run():
+            await self.agent.run("你好")
+            self.handle_command(
+                "/help",
+                self.current_session_id,
+                self.current_agent_id,
+                self.current_agent,
+                self.client,
+                self.config,
+                None,
+                self.db,
+                self.pending_tasks,
+                self.task_counter,
+                self.bg_outputs,
+            )
+            self.handle_command(
+                "/history 10",
+                self.current_session_id,
+                self.current_agent_id,
+                self.current_agent,
+                self.client,
+                self.config,
+                None,
+                self.db,
+                self.pending_tasks,
+                self.task_counter,
+                self.bg_outputs,
+            )
+
+            log = self.handle_command(
+                "/log 10",
+                self.current_session_id,
+                self.current_agent_id,
+                self.current_agent,
+                self.client,
+                self.config,
+                None,
+                self.db,
+                self.pending_tasks,
+                self.task_counter,
+                self.bg_outputs,
+            )
+
+            assert log is not None
+            assert "你好" in log
+            assert "/help" not in log
+            assert "/history" not in log
+
+        asyncio.run(run())
+
+    def test_commands_not_saved_to_history(self):
+        """測試 / 指令不會寫入 history"""
+
+        async def run():
+            await self.agent.run("第一句")
+            self.handle_command(
+                "/list",
+                self.current_session_id,
+                self.current_agent_id,
+                self.current_agent,
+                self.client,
+                self.config,
+                None,
+                self.db,
+                self.pending_tasks,
+                self.task_counter,
+                self.bg_outputs,
+            )
+            await self.agent.run("第二句")
+
+            history = self.handle_command(
+                "/history 10",
+                self.current_session_id,
+                self.current_agent_id,
+                self.current_agent,
+                self.client,
+                self.config,
+                None,
+                self.db,
+                self.pending_tasks,
+                self.task_counter,
+                self.bg_outputs,
+            )
+
+            assert "第一句" in history
+            assert "第二句" in history
+            assert "/list" not in history
+
+        asyncio.run(run())
+
+    def test_bg_saves_only_prompt(self):
+        """測試 /bg 只儲存實際 prompt，不包含 /bg 前綴"""
+
+        async def run():
+            await self.agent.run("說 hi")
+
+            self.handle_command(
+                "/bg 真空管是什麼",
+                self.current_session_id,
+                self.current_agent_id,
+                self.current_agent,
+                self.client,
+                self.config,
+                None,
+                self.db,
+                self.pending_tasks,
+                self.task_counter,
+                self.bg_outputs,
+            )
+
+            await asyncio.sleep(0.1)
+
+            log = self.handle_command(
+                "/log 10",
+                self.current_session_id,
+                self.current_agent_id,
+                self.current_agent,
+                self.client,
+                self.config,
+                None,
+                self.db,
+                self.pending_tasks,
+                self.task_counter,
+                self.bg_outputs,
+            )
+
+            assert log is not None
+            assert "真空管是什麼" in log
+            assert "/bg 真空管" not in log
+
+        asyncio.run(run())
+
+    def test_log_empty_shows_message(self):
+        """測試 /log 空內容時顯示提示"""
+
+        async def run():
+            log = self.handle_command(
+                "/log 10",
+                self.current_session_id,
+                self.current_agent_id,
+                self.current_agent,
+                self.client,
+                self.config,
+                None,
+                self.db,
+                self.pending_tasks,
+                self.task_counter,
+                self.bg_outputs,
+            )
+
+            assert log is not None
+            assert "沒有內容" in log
 
         asyncio.run(run())
 

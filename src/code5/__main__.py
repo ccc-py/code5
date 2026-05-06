@@ -299,7 +299,8 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: 
 
 def handle_command(user_input: str, current_session_id: list, current_agent_id: list, current_agent: list, client, config, reviewer, db, pending_tasks: dict | None = None, task_counter: list | None = None, bg_outputs: dict | None = None) -> str | None:
     """Handle / commands."""
-    current_agent[0].memory.update(user_input, "", None)
+    if not user_input.startswith("/"):
+        current_agent[0].memory.update(user_input, "", None)
     cmd = user_input.lower()
 
     # /help
@@ -561,9 +562,10 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
             for item in key_info:
                 output += f"\n  * {item}"
         output += f"\n--- 對話記錄 ({len(convs)} 項) ---"
-        for c in convs:
-            if c["content"].startswith("/"):
-                continue
+        display_convs = [c for c in convs if not c["content"].startswith("/")]
+        if not display_convs:
+            output += f"\n沒有內容，背景對話可能尚未完成...."
+        for c in display_convs:
             marker = "你" if c["role"] == "user" else "AI"
             output += f"\n[{marker}] {c['content']}"
         output += "\n" + "=" * 50
