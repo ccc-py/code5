@@ -204,14 +204,7 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: 
                 break
 
     async def check_pending_tasks() -> None:
-        done_ids = []
-        for task_id, task in list(pending_tasks.items()):
-            if task.done():
-                done_ids.append(task_id)
-                try:
-                    task.result()
-                except Exception:
-                    pass
+        done_ids = [tid for tid, task in pending_tasks.items() if task.done()]
         for tid in done_ids:
             del pending_tasks[tid]
 
@@ -569,6 +562,8 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
                 output += f"\n  * {item}"
         output += f"\n--- 對話記錄 ({len(convs)} 項) ---"
         for c in convs:
+            if c["content"].startswith("/"):
+                continue
             marker = "你" if c["role"] == "user" else "AI"
             output += f"\n[{marker}] {c['content']}"
         output += "\n" + "=" * 50

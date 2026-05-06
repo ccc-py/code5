@@ -89,6 +89,7 @@ class Database:
         except sqlite3.OperationalError:
             cursor.execute("ALTER TABLE key_info ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'root'")
 
+        cursor.execute("PRAGMA journal_mode=WAL")
         conn.commit()
         conn.close()
 
