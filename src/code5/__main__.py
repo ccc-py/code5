@@ -245,7 +245,6 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: 
                 else:
                     print(f"[你] {user_input}")
                     await current_agent[0].run(user_input)
-                    print(result)
                     print("-" * 50)
 
             while pending_tasks:
@@ -297,7 +296,6 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: 
                     await check_pending_tasks()
                     try:
                         await current_agent[0].run(user_input)
-                        print(result)
                     except Exception as e:
                         print(f"錯誤: {e}")
                     if is_interactive:
@@ -363,11 +361,14 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
                 sys.stdout = output_buffer
                 sys.stderr = output_buffer
                 await current_agent[0].run(prompt)
+            except Exception as e:
+                if bg_outputs is not None:
+                    bg_outputs[task_id] = f"[錯誤] {type(e).__name__}: {e}"
             finally:
                 sys.stdout = old_stdout
                 sys.stderr = old_stderr
-                output = output_buffer.getvalue()
-                if bg_outputs is not None:
+                if bg_outputs is not None and not bg_outputs[task_id].startswith("[錯誤]"):
+                    output = output_buffer.getvalue()
                     bg_outputs[task_id] = output if output else "[完成，無輸出]"
 
         task = asyncio.create_task(run_bg())
@@ -390,12 +391,15 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
             return "\n沒有背景任務輸出\n" + "=" * 50
         output = "\n=== 背景任務輸出 ==="
         for tid, content in items:
-            status = "完成" if not content.startswith("[進行中]") else "進行中"
-            output += f"\n#{tid} ({status}):"
             if content.startswith("[進行中]"):
-                output += f" {content}"
+                status = "進行中"
+                output += f"\n#{tid} ({status}): {content}"
+            elif content.startswith("[錯誤]"):
+                status = "錯誤"
+                output += f"\n#{tid} ({status}): {content}"
             else:
-                output += f"\n{content}"
+                status = "完成"
+                output += f"\n#{tid} ({status}):\n{content}"
         output += "\n" + "=" * 50
         return output
 
