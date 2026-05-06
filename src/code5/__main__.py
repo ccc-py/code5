@@ -66,8 +66,8 @@ Code5 - AI Coding Agent
 
 互動模式指令:
   /help              - 顯示這說明
-  /history           - 顯示目前 agent 提問
-  /log               - 顯示目前 agent 完整記錄
+  /history <n>       - 查看前 n 筆提問
+  /log <n>           - 查看前 n 筆記錄
   /shell <cmd>       - 執行 shell 命令
   /list              - 列出所有 session
   /now              - 顯示目前 session
@@ -78,6 +78,9 @@ Code5 - AI Coding Agent
   /agent attach <name> - 切換到其他 agent
   /agent history    - 顯示該 agent 提問
   /agent log         - 顯示該 agent 完整記錄
+  /bg <prompt>       - 背景執行，不等待結果
+  /bglog <n>         - 查看前 n 個背景任務輸出
+  /jobs              - 查看背景任務狀態
   /exit              - 結束對話
 """)
         return
@@ -182,6 +185,7 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: 
     current_agent_id = ["root"]
     current_agent = [agent]
     pending_tasks: dict[str, asyncio.Task] = {}
+    bg_outputs: dict[str, str] = {}
     task_counter = [0]
     user_input_lines: list[str] = []
     input_lock = threading.Lock()
@@ -210,6 +214,10 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: 
                     pass
         for tid in done_ids:
             del pending_tasks[tid]
+            if tid in bg_outputs:
+                output = bg_outputs.pop(tid)
+                if output:
+                    print(f"[背景任務 #{tid} 輸出]\n{output}")
 
     async def run_once():
         if not sys.stdin.isatty():
@@ -231,7 +239,7 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: 
                     continue
 
                 if user_input.startswith("/"):
-                    result = handle_command(user_input, current_session_id, current_agent_id, current_agent, client, config, reviewer, db, pending_tasks, task_counter)
+                    result = handle_command(user_input, current_session_id, current_agent_id, current_agent, client, config, reviewer, db, pending_tasks, task_counter, bg_outputs)
                     if result is not None:
                         print(result)
                 else:
@@ -278,7 +286,7 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: 
 
                 if user_input.startswith("/"):
                     is_bg = user_input.startswith("/bg ")
-                    result = handle_command(user_input, current_session_id, current_agent_id, current_agent, client, config, reviewer, db, pending_tasks, task_counter)
+                    result = handle_command(user_input, current_session_id, current_agent_id, current_agent, client, config, reviewer, db, pending_tasks, task_counter, bg_outputs)
                     if result is not None:
                         print(result)
                     if is_interactive:
@@ -303,7 +311,7 @@ def run_session(command: str, session_name: str, mock: bool, verbose: bool, bg: 
     asyncio.run(run_once())
 
 
-def handle_command(user_input: str, current_session_id: list, current_agent_id: list, current_agent: list, client, config, reviewer, db, pending_tasks: dict | None = None, task_counter: list | None = None) -> str | None:
+def handle_command(user_input: str, current_session_id: list, current_agent_id: list, current_agent: list, client, config, reviewer, db, pending_tasks: dict | None = None, task_counter: list | None = None, bg_outputs: dict | None = None) -> str | None:
     """Handle / commands."""
     current_agent[0].memory.update(user_input, "", None)
     cmd = user_input.lower()
@@ -313,8 +321,8 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
         return """
 === 可用指令 ===
 /help              - 顯示這說明
-/history           - 顯示目前 agent 提問
-/log               - 顯示目前 agent 完整記錄
+/history <n>       - 查看前 n 筆提問
+/log <n>           - 查看前 n 筆記錄
 /shell <cmd>      - 執行 shell 命令
 /list              - 列出所有 session
 /now              - 顯示目前 session
@@ -326,6 +334,7 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
 /agent history    - 顯示該 agent 提問
 /agent log         - 顯示該 agent 完整記錄
 /bg <prompt>       - 背景執行，不等待結果
+/bglog <n>         - 查看前 n 個背景任務輸出
 /jobs              - 查看背景任務狀態
 /exit              - 結束對話
 """
@@ -339,6 +348,9 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
             return "用法: /bg <prompt>"
         task_counter[0] += 1
         task_id = str(task_counter[0])
+
+        if bg_outputs is not None:
+            bg_outputs[task_id] = f"[進行中] {prompt}"
 
         from io import StringIO
         output_buffer = StringIO()
@@ -355,12 +367,37 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
                 sys.stdout = old_stdout
                 sys.stderr = old_stderr
                 output = output_buffer.getvalue()
-                if output:
-                    print(f"[背景任務 #{task_id} 輸出]\n{output}")
+                if bg_outputs is not None:
+                    bg_outputs[task_id] = output if output else "[完成，無輸出]"
 
         task = asyncio.create_task(run_bg())
         pending_tasks[task_id] = task
-        return "任務已在背景執行 ..."
+        return f"任務已在背景執行 (ID: #{task_id}) ..."
+
+    # /bglog - 查看背景任務輸出
+    if cmd.startswith("/bglog"):
+        if bg_outputs is None:
+            return "錯誤: 無法使用背景輸出功能"
+        parts = user_input.split()
+        if len(parts) < 2:
+            return "用法: /bglog <n> - 查看前 n 個背景任務輸出"
+        try:
+            n = int(parts[1])
+        except ValueError:
+            return "用法: /bglog <n> - n 必須是數字"
+        items = list(bg_outputs.items())[-n:]
+        if not items:
+            return "\n沒有背景任務輸出\n" + "=" * 50
+        output = "\n=== 背景任務輸出 ==="
+        for tid, content in items:
+            status = "完成" if not content.startswith("[進行中]") else "進行中"
+            output += f"\n#{tid} ({status}):"
+            if content.startswith("[進行中]"):
+                output += f" {content}"
+            else:
+                output += f"\n{content}"
+        output += "\n" + "=" * 50
+        return output
 
     # /jobs - 查看背景任務
     if cmd in ("/jobs", "jobs"):
@@ -527,14 +564,14 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
     # /history
     if cmd.startswith("/history") or cmd.startswith("history"):
         parts = user_input.split()
-        n = None
-        if len(parts) > 1:
-            try:
-                n = int(parts[1])
-            except ValueError:
-                pass
+        if len(parts) < 2:
+            return "用法: /history <n> - 查看前 n 筆提問"
+        try:
+            n = int(parts[1])
+        except ValueError:
+            return "用法: /history <n> - n 必須是數字"
         all_questions = db.get_user_conversations(current_session_id[0], current_agent_id[0])
-        questions = all_questions[-n:] if n else all_questions
+        questions = all_questions[-n:]
         start_idx = len(all_questions) - len(questions) + 1
         output = f"\n=== {current_agent_id[0]} 提問 ==="
         for i, q in enumerate(questions):
@@ -545,14 +582,14 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
     # /log
     if cmd.startswith("/log") or cmd.startswith("log"):
         parts = user_input.split()
-        n = None
-        if len(parts) > 1:
-            try:
-                n = int(parts[1])
-            except ValueError:
-                pass
+        if len(parts) < 2:
+            return "用法: /log <n> - 查看前 n 筆記錄"
+        try:
+            n = int(parts[1])
+        except ValueError:
+            return "用法: /log <n> - n 必須是數字"
         all_convs = db.get_conversations(current_session_id[0], current_agent_id[0])
-        convs = all_convs[-n:] if n else all_convs
+        convs = all_convs[-n:]
         start_idx = len(all_convs) - len(convs) + 1
         key_info = db.get_key_info(current_session_id[0], current_agent_id[0])
         output = f"\n=== {current_agent_id[0]} 完整記錄 ==="
