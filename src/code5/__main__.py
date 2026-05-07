@@ -564,7 +564,7 @@ def handle_command(user_input: str, current_session_id: list, current_agent_id: 
         output += f"\n--- 對話記錄 ({len(convs)} 項) ---"
         display_convs = [c for c in convs if not c["content"].startswith("/")]
         if not display_convs:
-            output += f"\n沒有內容，背景對話可能尚未完成...."
+            output += "\n沒有內容，背景對話可能尚未完成...."
         for c in display_convs:
             marker = "你" if c["role"] == "user" else "AI"
             output += f"\n[{marker}] {c['content']}"

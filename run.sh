@@ -1,5 +1,6 @@
-# pip install -e .
-python -m code5 /attach ccc3
+cd "$(dirname "$0")"
+pip3 install -e .
+python3 -m code5 /new ccctest2
 # python -m code5 /attach ccctest
 # python -m code5 /attach ccctest --mock
 #python -m code5 run

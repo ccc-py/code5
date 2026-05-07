@@ -26,6 +26,10 @@ dependencies = [
     "aiohttp>=3.9.0",
     "pydantic>=2.0.0",
     "click>=8.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "jinja2>=3.0.0",
+    "markdown>=3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +38,13 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-mock>=3.10.0",
     "ruff>=0.1.0",
+    "httpx>=0.24.0",
+    "playwright>=1.40.0",
+]
+web = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "jinja2>=3.0.0",
 ]
 
 [project.scripts]
@@ -55,13 +66,19 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
 ignore = ["E501"]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tests/*" = ["F401", "B011"]
+"simple_cli.py" = ["B023"]
