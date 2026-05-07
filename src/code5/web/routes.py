@@ -119,6 +119,15 @@ async def get_config() -> dict[str, Any]:
     }
 
 
+def handle_message(message: str, session_history: list[dict[str, str]]) -> str:
+    """Handle message - either command or LLM."""
+    from .commands import execute_command, is_command
+
+    if is_command(message):
+        return execute_command(message, session_history)
+    return None
+
+
 @router.post("/chat")
 async def chat(request: ChatRequest) -> ChatResponse:
     """Handle chat request."""
@@ -131,8 +140,12 @@ async def chat(request: ChatRequest) -> ChatResponse:
         if not session:
             session = web_app.session_store.create(session_id)
 
-    agent = create_client_and_agent()
-    response = await agent.run(request.message)
+    result = handle_message(request.message, session.history)
+    if result:
+        response = result
+    else:
+        agent = create_client_and_agent()
+        response = await agent.run(request.message)
 
     session.history.append({"role": "user", "content": request.message})
     session.history.append({"role": "assistant", "content": response})
@@ -179,6 +192,8 @@ async def generate_chat_stream(message: str, session_id: str):
 @router.post("/chat/stream")
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
     """Handle streaming chat request."""
+    from .commands import execute_command, is_command
+
     session_id = request.session_id
     if not session_id:
         session = web_app.session_store.create()
@@ -187,6 +202,23 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         session = web_app.session_store.get(session_id)
         if not session:
             session = web_app.session_store.create(session_id)
+
+    if is_command(request.message):
+        result = execute_command(request.message, session.history)
+        session.history.append({"role": "user", "content": request.message})
+        session.history.append({"role": "assistant", "content": result})
+
+
+        async def command_stream():
+            yield f"data: {{\"session_id\": \"{session_id}\"}}\n\n"
+            escaped = result.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
+            yield f"data: {escaped}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            command_stream(),
+            media_type="text/event-stream",
+        )
 
     return StreamingResponse(
         generate_chat_stream(request.message, session_id),

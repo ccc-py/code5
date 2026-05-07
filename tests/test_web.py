@@ -401,6 +401,7 @@ class TestWebPlaywright:
         import os
         import subprocess
         import time
+        import urllib.request
 
         os.environ["CODE5_WEB_USE_MOCK"] = "true"
 
@@ -409,7 +410,13 @@ class TestWebPlaywright:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        time.sleep(3)
+
+        for _ in range(10):
+            try:
+                urllib.request.urlopen("http://localhost:8000/", timeout=1)
+                break
+            except Exception:
+                time.sleep(0.5)
 
         from playwright.sync_api import sync_playwright
 
@@ -425,6 +432,7 @@ class TestWebPlaywright:
         self.playwright.stop()
         self.server_process.terminate()
         self.server_process.wait()
+        time.sleep(1)
 
     def test_homepage_loads(self) -> None:
         """Test that homepage loads with Code5 title."""
@@ -467,3 +475,93 @@ class TestWebPlaywright:
         self.page.wait_for_timeout(500)
         sessions = self.page.locator(".session-item").all()
         assert len(sessions) >= 1
+
+
+class TestWebCommands:
+    """Unit tests for web commands module."""
+
+    def test_is_command(self) -> None:
+        """Test command detection."""
+        from code5.web.commands import is_command
+
+        assert is_command("/shell ls") is True
+        assert is_command("/history 5") is True
+        assert is_command("/help") is True
+        assert is_command("hello") is False
+        assert is_command("  /log 10") is True
+
+    def test_parse_command(self) -> None:
+        """Test command parsing."""
+        from code5.web.commands import parse_command
+
+        cmd, args = parse_command("/shell ls -la")
+        assert cmd == "/shell"
+        assert args == ["ls", "-la"]
+
+        cmd, args = parse_command("/history 5")
+        assert cmd == "/history"
+        assert args == ["5"]
+
+        cmd, args = parse_command("hello")
+        assert cmd == "hello"
+        assert args == []
+
+    def test_execute_shell(self) -> None:
+        """Test shell command execution."""
+        from code5.web.commands import execute_shell
+
+        result = execute_shell("echo hello")
+        assert "hello" in result
+
+        result = execute_shell("pwd")
+        assert result
+
+    def test_execute_history(self) -> None:
+        """Test history command."""
+        from code5.web.commands import agent_store, execute_history
+
+        agent_store.create_agent("test-agent")
+        agent_store.add_conversation("test-agent", "user", "question 1")
+        agent_store.add_conversation("test-agent", "assistant", "answer 1")
+
+        result = execute_history(5, "test-agent")
+        assert "question 1" in result
+
+    def test_execute_log(self) -> None:
+        """Test log command."""
+        from code5.web.commands import agent_store, execute_log
+
+        agent_store.create_agent("test-agent-2")
+        agent_store.add_conversation("test-agent-2", "user", "test msg")
+        agent_store.add_conversation("test-agent-2", "assistant", "test response")
+
+        result = execute_log(5, "test-agent-2")
+        assert "test msg" in result
+
+    def test_agent_management(self) -> None:
+        """Test agent list/new/attach commands."""
+        from code5.web.commands import (
+            agent_store,
+            execute_agent_attach,
+            execute_agent_list,
+            execute_agent_new,
+        )
+
+        result = execute_agent_list()
+        assert "Agents" in result
+
+        result = execute_agent_new("new-agent")
+        assert "new-agent" in result
+
+        result = execute_agent_attach("new-agent")
+        assert "new-agent" in result
+
+    def test_help_command(self) -> None:
+        """Test help command."""
+        from code5.web.commands import execute_command
+
+        result = execute_command("/help", [])
+        assert "shell" in result
+        assert "history" in result
+        assert "log" in result
+        assert "agent" in result
