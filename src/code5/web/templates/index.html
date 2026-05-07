@@ -260,9 +260,10 @@
 
         function renderMarkdown(text) {
             const unescaped = unescapeSSE(text);
+            const fixed = unescaped.replace(/^(#{1,6})([^\s#])/gm, '$1 $2');
             if (typeof marked !== 'undefined' && marked.parse) {
                 try {
-                    return marked.parse(unescaped);
+                    return marked.parse(fixed);
                 } catch (e) {
                     console.error('Markdown parse error:', e);
                     return escapeHtml(text);

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code5 - 選擇 Session</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 2rem 0;
+        }
+        .container {
+            background: #2d2d2d;
+            padding: 2rem;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+        }
+        .section {
+            margin-bottom: 1.5rem;
+        }
+        .section h2 {
+            font-size: 1rem;
+            color: #888;
+            margin-bottom: 0.5rem;
+        }
+        .session-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            max-height: 50vh;
+            overflow-y: auto;
+        }
+        .session-item {
+            background: #1e1e1e;
+            padding: 0.8rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid #3e3e3e;
+            transition: all 0.2s;
+        }
+        .session-item:hover {
+            border-color: #4ec9b0;
+            background: #252526;
+        }
+        .session-item.selected {
+            border-color: #4ec9b0;
+            background: #264f78;
+        }
+        .new-session {
+            display: flex;
+            gap: 0.5rem;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 0.8rem;
+            border: 1px solid #3e3e3e;
+            border-radius: 4px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-size: 1rem;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #4ec9b0;
+        }
+        button {
+            padding: 0.8rem 1.5rem;
+            background: #4ec9b0;
+            color: #1e1e1e;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #3db892;
+        }
+        .info {
+            color: #888;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code5 - 選擇 Session</h1>
+        
+        <div class="section">
+            <h2>選擇現有 Session</h2>
+            <div class="session-list" id="session-list">
+                <div class="info">載入中...</div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>建立新 Session</h2>
+            <div class="new-session">
+                <input type="text" id="new-session-name" placeholder="輸入名稱...">
+                <button id="create-btn">建立</button>
+            </div>
+        </div>
+        
+        <div class="info">
+            使用 /list 查看所有 sessions<br>
+            使用 /new <name> 建立新 session<br>
+            使用 /attach <name> 切換 session
+        </div>
+    </div>
+
+    <script>
+        async function loadSessions() {
+            const res = await fetch('/api/sessions');
+            const sessions = await res.json();
+            const listEl = document.getElementById('session-list');
+            
+            if (sessions.length === 0) {
+                listEl.innerHTML = '<div class="info">目前沒有 sessions，請建立新 session</div>';
+                return;
+            }
+            
+            listEl.innerHTML = sessions.map(s => 
+                `<div class="session-item" data-id="${s.session_id}">
+                    ${s.session_id} (${s.message_count} messages)
+                </div>`
+            ).join('');
+            
+            document.querySelectorAll('.session-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const id = item.dataset.id;
+                    window.location.href = '/chat?session=' + id;
+                });
+            });
+        }
+
+        document.getElementById('create-btn').addEventListener('click', async () => {
+            const name = document.getElementById('new-session-name').value.trim();
+            if (!name) return;
+            
+            const res = await fetch('/api/sessions?session_id=' + encodeURIComponent(name), {
+                method: 'POST'
+            });
+            const data = await res.json();
+            window.location.href = '/chat?session=' + data.session_id;
+        });
+
+        loadSessions();
+    </script>
+</body>
+</html>

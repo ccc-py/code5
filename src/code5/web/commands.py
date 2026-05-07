@@ -101,26 +101,26 @@ def execute_shell(command: str) -> str:
         return f"執行錯誤: {e}"
 
 
-def execute_history(n: int, agent_name: str | None = None) -> str:
+def execute_history(n: int, session_history: list[dict[str, str]]) -> str:
     """Execute /history command."""
-    agent = agent_name or agent_store.current_agent
-    questions = agent_store.get_user_messages(agent, n)
-    if not questions:
+    user_messages = [h["content"] for h in session_history if h["role"] == "user"]
+    if not user_messages:
         return "目前沒有提問記錄"
-    output = f"=== {agent} 提問 (最近 {len(questions)} 筆) ===\n"
-    for i, q in enumerate(questions, 1):
-        output += f"{i}. {q}\n"
+    messages = user_messages[-n:]
+    output = f"【提問記錄】(最近 {len(messages)} 筆)\n"
+    for i, m in enumerate(messages, 1):
+        content = m[:100] + "..." if len(m) > 100 else m
+        output += f"{i}. {content}\n"
     output += "=" * 40
     return output
 
 
-def execute_log(n: int, agent_name: str | None = None) -> str:
+def execute_log(n: int, session_history: list[dict[str, str]]) -> str:
     """Execute /log command."""
-    agent = agent_name or agent_store.current_agent
-    history = agent_store.get_full_history(agent, n)
-    if not history:
+    if not session_history:
         return "目前沒有記錄"
-    output = f"=== {agent} 完整記錄 (最近 {len(history)} 筆) ===\n"
+    history = session_history[-n:]
+    output = f"【完整記錄】(最近 {len(history)} 筆)\n"
     for h in history:
         marker = "你" if h["role"] == "user" else "AI"
         content = h["content"][:100] + "..." if len(h["content"]) > 100 else h["content"]
@@ -136,11 +136,11 @@ def execute_agent_list() -> str:
     if not agents:
         agents = ["root"]
         agent_store.create_agent("root")
-    output = "=== Agents ===\n"
+    output = "【Agents】\n"
     for a in agents:
         marker = " <-" if a == current else ""
         output += f"  {a}{marker}\n"
-    output += "=" * 40
+    output += "-" * 40
     return output
 
 
@@ -170,10 +170,10 @@ def execute_agent_history(n: int | None = None) -> str:
     history = agent_store.get_user_messages(agent_store.current_agent, n)
     if not history:
         return f"Agent '{agent_store.current_agent}' 沒有提問記錄"
-    output = f"=== {agent_store.current_agent} 提問 ===\n"
+    output = f"【{agent_store.current_agent} 提問】\n"
     for i, h in enumerate(history, 1):
         output += f"{i}. {h}\n"
-    output += "=" * 40
+    output += "-" * 40
     return output
 
 
@@ -182,11 +182,11 @@ def execute_agent_log(n: int | None = None) -> str:
     history = agent_store.get_full_history(agent_store.current_agent, n)
     if not history:
         return f"Agent '{agent_store.current_agent}' 沒有記錄"
-    output = f"=== {agent_store.current_agent} 記錄 ===\n"
+    output = f"【{agent_store.current_agent} 記錄】\n"
     for h in history:
         marker = "你" if h["role"] == "user" else "AI"
         output += f"[{marker}] {h['content'][:80]}...\n"
-    output += "=" * 40
+    output += "-" * 40
     return output
 
 
@@ -205,14 +205,14 @@ def execute_command(message: str, session_history: list[dict[str, str]]) -> str:
             n = int(args[0]) if args else 10
         except ValueError:
             return "用法: /history <n> - n 必須是數字"
-        result = execute_history(n)
+        result = execute_history(n, session_history)
 
     elif cmd in ("/log", "log"):
         try:
             n = int(args[0]) if args else 10
         except ValueError:
             return "用法: /log <n> - n 必須是數字"
-        result = execute_log(n)
+        result = execute_log(n, session_history)
 
     elif cmd in ("/agent", "agent"):
         if not args:
@@ -238,7 +238,7 @@ def execute_command(message: str, session_history: list[dict[str, str]]) -> str:
             result = f"未知 agent 指令: {subcmd}"
 
     elif cmd in ("/help", "help"):
-        result = """=== Code5 指令說明 ===
+        result = """【Code5 指令說明】
 
 /shell <cmd>   - 執行 shell 命令
 /history <n>   - 查看前 n 筆提問
@@ -248,9 +248,52 @@ def execute_command(message: str, session_history: list[dict[str, str]]) -> str:
 /agent attach <name> - 切換 agent
 /agent history - 顯示 agent 提問
 /agent log     - 顯示 agent 記錄
+/list          - 列出所有 sessions
+/new <name>   - 建立新 session
+/attach <name> - 切換到其他 session
+/now           - 顯示目前 session 和 agent
+/exit          - 結束對話
 /help          - 顯示說明
 
 """
+
+    elif cmd in ("/list", "list"):
+        from .app import session_store
+        sessions = session_store.list()
+        if not sessions:
+            result = "目前沒有 sessions"
+        else:
+            result = "【Sessions】\n"
+            for s in sessions:
+                result += f"  {s['session_id']} ({s['message_count']} messages)\n"
+            result += "-" * 40
+
+    elif cmd in ("/new", "new"):
+        if not args:
+            return "用法: /new <name>"
+        from .app import session_store
+        session = session_store.create(args[0])
+        result = f"已建立並切換到 session: {session.session_id}"
+
+    elif cmd in ("/attach", "attach"):
+        if not args:
+            return "用法: /attach <name>"
+        from .app import session_store
+        session = session_store.get(args[0])
+        if not session:
+            result = f"Session '{args[0]}' 不存在"
+        else:
+            session_store.set_current(args[0])
+            result = f"已切換到 session: {args[0]}"
+
+    elif cmd in ("/now", "now"):
+        from .app import session_store
+        result = f"目前 session: {session_store.current_session_id or '無'}\\n"
+        result += f"目前 agent: {agent_store.current_agent}"
+
+    elif cmd in ("/exit", "/quit", "exit", "quit"):
+        result = "再見！如要重新開始，請刷新頁面。"
+
     else:
         result = f"未知指令: {cmd}"
 

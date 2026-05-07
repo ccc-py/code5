@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -153,6 +153,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
     return ChatResponse(response=response, session_id=session_id)
 
 
+def escape_sse(text: str) -> str:
+    """Escape text for SSE format."""
+    return text.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
+
+
 async def generate_chat_stream(message: str, session_id: str):
     """Generate streaming chat response."""
     from code5.client import MockClient
@@ -169,7 +174,8 @@ async def generate_chat_stream(message: str, session_id: str):
         full_response = ""
         async for chunk in mock_client.generate_stream(message, ""):
             full_response += chunk
-            yield f"data: {chunk}\n\n"
+            escaped = escape_sse(chunk)
+            yield f"data: {escaped}\n\n"
     else:
         from code5.client import create_client
         from code5.config import load_config_from_env
@@ -179,7 +185,8 @@ async def generate_chat_stream(message: str, session_id: str):
         full_response = ""
         async for chunk in client.generate_stream(message, ""):
             full_response += chunk
-            yield f"data: {chunk}\n\n"
+            escaped = escape_sse(chunk)
+            yield f"data: {escaped}\n\n"
 
     session = web_app.session_store.get(session_id)
     if session:
@@ -211,7 +218,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
         async def command_stream():
             yield f"data: {{\"session_id\": \"{session_id}\"}}\n\n"
-            escaped = result.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
+            escaped = escape_sse(result)
             yield f"data: {escaped}\n\n"
             yield "data: [DONE]\n\n"
 
@@ -229,10 +236,23 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 def setup_html_routes(app: FastAPI) -> None:
     """Setup HTML routes."""
 
-    @app.get("/", response_class=HTMLResponse)
-    async def index(request: Request) -> HTMLResponse:
-        """Render the main chat page."""
+    @app.get("/sessions", response_class=HTMLResponse)
+    async def sessions_page(request: Request) -> HTMLResponse:
+        """Render the session selection page."""
+        return templates.TemplateResponse(request, "session.html")
+
+    @app.get("/chat", response_class=HTMLResponse)
+    async def chat_page(request: Request) -> HTMLResponse:
+        """Render the chat page."""
         return templates.TemplateResponse(request, "index.html")
+
+    @app.get("/", response_class=HTMLResponse)
+    async def index(request: Request) -> RedirectResponse:
+        """Redirect to session selection page."""
+        session_id = request.query_params.get("session")
+        if session_id:
+            return RedirectResponse(url=f"/chat?session={session_id}")
+        return RedirectResponse(url="/sessions")
 
 
 def init_routes(app: FastAPI) -> None:
