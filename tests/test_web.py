@@ -50,9 +50,13 @@ class TestSessionStore:
         result = store.delete("nonexistent")
         assert result is False
 
+    def setup_method(self) -> None:
+        self.store = SessionStore()
+        self.store.clear()
+
     def test_list_sessions(self) -> None:
         """Test listing all sessions."""
-        store = SessionStore()
+        store = self.store
         store.create("session1")
         store.create("session2")
         sessions = store.list()
@@ -82,6 +86,10 @@ class TestWebSession:
 
 class TestWebAPI:
     """API integration tests using TestClient."""
+
+    def setup_method(self) -> None:
+        from code5.web.app import session_store as web_session_store
+        web_session_store.clear()
 
     def test_index_page_redirects_to_sessions(self) -> None:
         """Test that index page redirects to sessions."""
@@ -242,33 +250,29 @@ class TestWebAPI:
     def test_chat_stream(self) -> None:
         """Test streaming chat endpoint."""
         from code5.web.app import app
+        from code5.web.app import session_store as web_session_store
 
-        client = TestClient(app)
-        response = client.post(
-            "/api/chat/stream",
-            json={"message": "Hello"},
-            stream=True
-        )
-        assert response.status_code == 200
-
-        body = response.text
-        lines = [line for line in body.split('\n') if line.startswith('data: ')]
-        assert len(lines) >= 2
+        web_session_store.clear()
+        with TestClient(app) as client:
+            with client.stream("POST", "/api/chat/stream", json={"message": "Hello"}) as response:
+                assert response.status_code == 200
+                response.read()
+                body = response.text
+                lines = [line for line in body.split('\n') if line.startswith('data: ')]
+                assert len(lines) >= 2
 
     def test_chat_stream_with_session(self) -> None:
         """Test streaming chat with existing session."""
         from code5.web.app import app
+        from code5.web.app import session_store as web_session_store
 
-        client = TestClient(app)
-        create_resp = client.post("/api/sessions")
-        session_id = create_resp.json()["session_id"]
+        web_session_store.clear()
+        with TestClient(app) as client:
+            create_resp = client.post("/api/sessions")
+            session_id = create_resp.json()["session_id"]
 
-        response = client.post(
-            "/api/chat/stream",
-            json={"message": "Hello", "session_id": session_id},
-            stream=True
-        )
-        assert response.status_code == 200
+            with client.stream("POST", "/api/chat/stream", json={"message": "Hello", "session_id": session_id}) as response:
+                assert response.status_code == 200
 
 
 class TestWebE2E:
