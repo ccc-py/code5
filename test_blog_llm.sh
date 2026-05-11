@@ -1,0 +1,1 @@
+TEST_LLM=1 ./test_blog.sh --llm
