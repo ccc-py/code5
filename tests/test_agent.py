@@ -280,3 +280,113 @@ class TestIntegration:
 
         # 如果有 <end/>，就不會執行任何 shell 命令
         assert len(agent.memory.conversation) >= 2  # user + assistant
+
+    @pytest.mark.asyncio
+    async def test_multi_turn_generate_fastapi_blog(self, tmp_path: Path) -> None:
+        """多輪對話測試：要求產生一個 FastAPI 網誌系統
+
+        測試項目：
+        1. 單次 run() 內的 follow-up 循環（缺少 <end/> 時自動追問）
+        2. 跨多次 run() 的記憶累積
+        3. 複雜檔案建立操作的正確性
+        4. 產生的 Python 程式碼語法正確
+        """
+        import os
+        os.chdir(tmp_path)
+
+        # Turn 1 的回應：建立 blog 目錄與 main.py，但不加 <end/>
+        # 這會觸發 agent 的內部 follow-up 循環
+        blog_commands = (
+            '<shell>mkdir -p blog</shell>'
+            '<shell>cat > blog/main.py << \'EOF\'\n'
+            'from fastapi import FastAPI\n'
+            '\n'
+            'app = FastAPI()\n'
+            '\n'
+            '@app.get("/")\n'
+            'def read_root():\n'
+            '    return {"message": "Hello Blog"}\n'
+            '\n'
+            '@app.get("/posts")\n'
+            'def list_posts():\n'
+            '    return []\n'
+            'EOF</shell>'
+        )
+
+        # MockClient 匹配策略：
+        # - 首次 prompt 不含「需要更多命令」→ 回傳 blog_commands（無 <end/>）
+        # - follow-up prompt 含「需要更多命令」→ 回傳 <end/> 終止循環
+        mock_client = MockClient(
+            responses={
+                "需要更多命令": "<end/>",
+            },
+            default_response=blog_commands,
+        )
+
+        config = Config(use_mock=True)
+        agent = Code5Agent(client=mock_client, config=config, reviewer=MockReviewer())
+
+        # === Turn 1：產生 FastAPI 網誌（含內部 follow-up 循環） ===
+        result1 = await agent.run("產生一個 FastAPI 網誌")
+        assert isinstance(result1, str)
+
+        # 驗證檔案被建立
+        main_file = tmp_path / "blog" / "main.py"
+        assert main_file.exists(), "main.py 應該被建立"
+        main_content = main_file.read_text()
+        assert "FastAPI" in main_content
+        assert "read_root" in main_content
+        assert "list_posts" in main_content
+
+        # 驗證 Python 語法正確
+        compile(main_content, "main.py", "exec")
+
+        # 驗證內部 follow-up 循環確實發生過
+        # 第一次 prompt → blog_commands（無 <end/>）→ 觸發 follow-up
+        # 第二次 prompt（follow-up）→ <end/> → 結束循環
+        assert mock_client.call_count == 2, \
+            f"預期 LLM 被調用 2 次（初始 + follow-up），實際 {mock_client.call_count}"
+
+        # 驗證記憶：user + tool（assistant 為空字串因 follow-up 僅回 <end/>）
+        assert len(agent.memory.conversation) == 2
+
+        # === Turn 2：加入資料庫支援（跨 run() 的記憶累積） ===
+        # 移除 follow-up key 避免被舊 context 中的文字匹配到
+        del mock_client.responses["需要更多命令"]
+        mock_client.default_response = (
+            '<shell>cat > blog/database.py << \'EOF\'\n'
+            'from sqlalchemy import create_engine\n'
+            '\n'
+            'engine = create_engine("sqlite:///./blog.db")\n'
+            'EOF</shell>'
+            '<end/>'
+        )
+
+        result2 = await agent.run("加入資料庫支援")
+        assert isinstance(result2, str)
+
+        # 驗證新檔案被建立
+        db_file = tmp_path / "blog" / "database.py"
+        assert db_file.exists(), "database.py 應該被建立"
+        db_content = db_file.read_text()
+        assert "sqlalchemy" in db_content
+        assert "create_engine" in db_content
+
+        # 驗證 Python 語法正確
+        compile(db_content, "database.py", "exec")
+
+        # 驗證跨 turn 記憶累積
+        assert len(agent.memory.conversation) == 5, \
+            f"預期 5 條記憶（Turn1:2 + Turn2:3），實際 {len(agent.memory.conversation)}"
+
+        # === Turn 3：列出檔案（基本 shell 命令） ===
+        mock_client.default_response = '<shell>ls -la blog/</shell><end/>'
+
+        result3 = await agent.run("列出檔案")
+        assert isinstance(result3, str)
+
+        # 驗證記憶持續累積
+        assert len(agent.memory.conversation) == 8, \
+            f"預期 8 條記憶（Turn1:2 + Turn2:3 + Turn3:3），實際 {len(agent.memory.conversation)}"
+
+
